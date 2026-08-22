@@ -1,0 +1,913 @@
+/*
+  ファイル名: style.css
+  依存関係: index.html（全ID/クラスを参照） / script.js（body/#appへの
+            state-*・difficulty-* クラス付与を前提とする, 下記コメント参照）
+  ------------------------------------------------------------------
+  【今回の改修】既存機能・DOM構造(ID/クラス名)は一切変更せず、
+  以下のみを目的として全面的にスタイルを刷新した:
+    1. 近未来(ネオン/サイバー)テイストへのデザイン刷新
+    2. スマートフォンでの完全レスポンシブ対応
+    3. 性能バー(design-perf)がモバイル幅で崩れる不具合の修正
+       → 原因: @media(max-width:860px)で.design-perfをflex-direction:row
+         に切り替えていたため、内部の3行(軽さ/強度/安定性)が横並びに
+         押しつぶされ、バー/★表示が視認できないほど狭くなっていた。
+         本改修では常にcolumn(縦積み)のまま、幅と余白だけ調整する形に修正。
+    4. ステージ6等でLAUNCHボタンが画面下に埋もれてタップできない不具合の修正
+       → 原因: .launch-controls が中央寄せの1ブロックにボタンまで
+         内包しており、設定項目(背景/物理パラメータ)が増えるとスクロール
+         できないままボタンが画面外に押し出されていた。
+         本改修では設定項目を .launch-scroll（スクロール領域）に閉じ込め、
+         LAUNCHボタンは .launch-fixed-bar として画面下部に常時固定した
+         （index.html側もこの2要素に構造分離済み）。
+
+  処理軽減ルール(継続維持):
+    - backdrop-filter は一切使用しない
+    - will-change は本当に必要なHUD要素のみに限定
+    - transition は opacity / transform のみを対象にする
+      （状態変化そのものは即時切り替え。box-shadowのグロー演出は
+        static（アニメーションさせない）か、animationプロパティ
+        （transitionとは別種）でのみ用いる）
+*/
+
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Rajdhani:wght@400;500;600;700&family=Share+Tech+Mono&display=swap');
+
+/* ============================================================
+   :root カスタムプロパティ
+   ------------------------------------------------------------
+   既存の必須変数（--w-mobile / --hud-bg / --accent / --quiet）は
+   そのまま維持しつつ、ネオン演出用のトークンを追加した。
+============================================================ */
+:root {
+  /* ---- 既存必須変数（維持） ---- */
+  --w-mobile: 480px;
+  --hud-bg: rgba(4, 8, 16, .55);
+  --accent: #ffd166;      /* 主要インタラクション色（琥珀） */
+  --quiet: #6c757d;
+
+  /* ---- 補助トークン（既存） ---- */
+  --bg-void:      #05070d;
+  --bg-panel:     #0b111d;
+  --bg-panel-2:   #0e1626;
+  --bg-panel-3:   #080d18;
+  --accent-dim:   #a67d1a;
+  --accent-glow:  rgba(255, 209, 102, 0.35);
+  --warn:         #ffb020;
+  --danger:       #ff3b5c;
+  --success:      #39ff8f;
+  --text-main:    #e8f0f7;
+  --text-mute:    #7d8aa0;
+  --border-line:  rgba(255, 209, 102, 0.22);
+
+  /* ---- ネオン演出トークン（今回追加） ---- */
+  --neon:         #2fe8ff;                    /* セカンダリのネオンシアン */
+  --neon-glow:    rgba(47, 232, 255, 0.45);
+  --neon-dim:     rgba(47, 232, 255, 0.18);
+  --neon-magenta: #ff2ea8;                    /* アクセントのネオンマゼンタ（控えめに使用） */
+
+  /* 難易度バッジ色 */
+  --diff-beginner:     #2ecc71;
+  --diff-intermediate: #3b82f6;
+  --diff-advanced:     #ef4444;
+  --diff-custom:       #9ca3af;
+
+  --font-display: 'Orbitron', 'Yu Gothic', sans-serif;
+  --font-body:    'Rajdhani', 'Yu Gothic', sans-serif;
+  --font-mono:    'Share Tech Mono', monospace;
+  --radius-clip:  10px;
+
+  /* ノッチ端末のセーフエリア（固定LAUNCHバー等で使用） */
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-top: env(safe-area-inset-top, 0px);
+}
+
+/* ============================================================
+   リセット & 基本設定
+============================================================ */
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+html, body {
+  width: 100%; height: 100%;
+  background: var(--bg-void);
+  color: var(--text-main);
+  font-family: var(--font-body);
+  user-select: none;
+  -webkit-text-size-adjust: 100%;
+}
+body.noscroll { overflow: hidden; }
+
+button { font-family: inherit; border: none; cursor: pointer; background: none; color: inherit; }
+input { font-family: inherit; }
+canvas { display: block; }
+a { color: var(--accent); }
+
+button, .clickable, input[type="range"] { min-height: 44px; }
+.icon-btn, .btn-close { min-width: 44px; min-height: 44px; }
+
+/* 近未来感を出す全体の背景演出: 深宇宙グラデーション + 極薄グリッド */
+#app {
+  position: relative; z-index: 10; width: 100%; height: 100%;
+  background:
+    linear-gradient(180deg, rgba(47,232,255,0.05) 0%, transparent 40%),
+    repeating-linear-gradient(0deg, rgba(255,255,255,0.025) 0 1px, transparent 1px 34px),
+    repeating-linear-gradient(90deg, rgba(255,255,255,0.025) 0 1px, transparent 1px 34px);
+}
+
+/* ============================================================
+   3層canvas（#bg / #rocket / #overlay）
+============================================================ */
+.layer-canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+#overlay { z-index: 3; }
+#rocket { z-index: 2; }
+#bg { z-index: 1; }
+body.state-flight #overlay { pointer-events: auto; }
+
+/* ============================================================
+   画面(state)切り替え
+============================================================ */
+.screen { position: absolute; inset: 0; display: none; flex-direction: column; overflow: hidden; }
+.screen.active { display: flex; }
+
+#screen-flight { pointer-events: none; }
+#screen-flight .flight-controls,
+#screen-flight .hud-btn-retire {
+  pointer-events: auto;
+}
+
+/* ============================================================
+   共通HUDパネル（角切り欠き + ネオングロー境界）
+============================================================ */
+.hud-panel {
+  position: relative;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-line);
+  box-shadow: 0 0 0 1px rgba(47,232,255,0.06), 0 8px 24px rgba(0,0,0,0.35);
+  clip-path: polygon(
+    var(--radius-clip) 0, 100% 0, 100% calc(100% - var(--radius-clip)),
+    calc(100% - var(--radius-clip)) 100%, 0 100%, 0 var(--radius-clip)
+  );
+}
+
+/* ============================================================
+   共通ボタン
+============================================================ */
+.hud-btn {
+  position: relative;
+  padding: 12px 26px;
+  font-family: var(--font-display);
+  font-size: 0.85rem;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  background: rgba(255, 209, 102, 0.08);
+  border: 1px solid var(--accent-dim);
+  box-shadow: 0 0 14px rgba(255,209,102,0.08);
+  clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
+  transition: transform 0.15s ease, opacity 0.15s ease;
+  display: inline-flex; align-items: center; gap: 8px;
+}
+.hud-btn:hover { transform: translateY(-1px); opacity: 0.92; }
+.hud-btn:active { transform: translateY(0); }
+.hud-btn-primary { background: var(--accent); color: #241400; font-weight: 700; box-shadow: 0 0 22px var(--accent-glow); }
+.hud-btn-small { padding: 8px 16px; font-size: 0.75rem; min-height: 38px; }
+.hud-btn-launch {
+  background: var(--danger);
+  color: #1a0206;
+  font-weight: 700;
+  font-size: 1.15rem;
+  padding: 16px 44px;
+  border-color: #ff8093;
+  box-shadow: 0 0 26px rgba(255,59,92,0.45);
+  animation: launch-pulse 1.8s ease-in-out infinite;
+}
+@keyframes launch-pulse {
+  0%, 100% { box-shadow: 0 0 18px rgba(255,59,92,0.4); }
+  50%      { box-shadow: 0 0 34px rgba(255,59,92,0.75); }
+}
+
+.icon-btn {
+  width: 44px; height: 44px;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(255, 209, 102, 0.08);
+  border: 1px solid var(--accent-dim);
+  color: var(--accent);
+  font-size: 1.1rem;
+  transition: transform 0.15s ease;
+}
+.icon-btn:hover { transform: translateY(-1px); }
+.icon-btn.active { background: var(--accent); color: var(--bg-void); }
+.btn-icon { font-size: 0.9em; }
+.btn-close { font-size: 1.2rem; color: var(--text-mute); }
+.btn-close:hover { color: var(--danger); }
+
+.btn-quiet {
+  background: transparent;
+  border: 1px dashed var(--quiet);
+  color: var(--quiet);
+  padding: 4px 8px;
+  font-size: 0.8rem;
+  min-height: 44px;
+  transition: opacity 0.15s ease;
+}
+.btn-quiet:hover { opacity: 0.75; }
+
+.btn-group { display: flex; gap: 6px; flex-wrap: wrap; }
+.btn-toggle {
+  padding: 8px 14px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-mute);
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border-line);
+  min-height: 44px;
+  transition: transform 0.15s ease;
+}
+.btn-toggle.active { color: var(--bg-void); background: var(--accent); font-weight: 700; box-shadow: 0 0 12px var(--accent-glow); }
+.btn-toggle:hover { transform: translateY(-1px); }
+
+/* ============================================================
+   モーダル共通
+============================================================ */
+.modal {
+  position: absolute; inset: 0; z-index: 50;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(2, 5, 12, 0.86);
+  padding: 16px;
+}
+.hidden { display: none !important; }
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px;
+  padding: 0; margin: -1px; overflow: hidden;
+  clip: rect(0,0,0,0); white-space: nowrap; border: 0;
+}
+
+.modal.hidden { display: none; }
+.modal-panel {
+  width: min(560px, 94vw); max-height: 86vh;
+  background: var(--bg-panel);
+  border: 1px solid var(--accent-dim);
+  box-shadow: 0 0 40px rgba(0,0,0,0.5), 0 0 0 1px var(--neon-dim);
+  clip-path: polygon(16px 0, 100% 0, 100% calc(100% - 16px), calc(100% - 16px) 100%, 0 100%, 0 16px);
+  display: flex; flex-direction: column;
+}
+.modal-panel-wide { width: min(760px, 94vw); }
+.modal-header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 14px 20px;
+  font-family: var(--font-display);
+  color: var(--accent);
+  letter-spacing: 0.1em;
+  border-bottom: 1px solid var(--border-line);
+}
+.modal-body { padding: 20px; overflow-y: auto; font-size: 0.95rem; line-height: 1.8; -webkit-overflow-scrolling: touch; }
+.modal-body h3 { color: var(--accent); font-family: var(--font-display); font-size: 0.9rem; margin: 14px 0 6px; }
+.modal-body p { margin-bottom: 8px; color: var(--text-mute); }
+
+.rules-pdf-link {
+  display: inline-block;
+  margin-top: 18px;
+  padding: 10px 16px;
+  border: 1px dashed var(--accent-dim);
+  font-size: 0.85rem;
+  min-height: 44px;
+}
+.rules-pdf-link.hidden { display: none; }
+
+/* ============================================================
+   共通トップバー
+============================================================ */
+.topbar {
+  display: flex; align-items: center; gap: 12px;
+  padding: calc(10px + var(--safe-top)) 14px 10px;
+  border-bottom: 1px solid var(--border-line);
+  background: var(--hud-bg);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+.screen-title {
+  font-family: var(--font-display);
+  font-size: 0.9rem;
+  letter-spacing: 0.12em;
+  color: var(--accent);
+  flex: 1;
+  text-align: center;
+  text-shadow: 0 0 10px var(--accent-glow);
+}
+.topbar-spacer { width: 100px; }
+.topbar-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+/* ============================================================
+   1. home
+============================================================ */
+#screen-home { align-items: center; justify-content: center; }
+#home-bg-canvas { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 0; }
+.home-content {
+  position: relative; z-index: 1;
+  display: flex; flex-direction: column; align-items: center; gap: 28px;
+  text-align: center;
+  padding: 16px;
+  width: 100%;
+}
+.game-title { display: flex; flex-direction: column; gap: 6px; }
+.title-main {
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-size: clamp(2.1rem, 9vw, 4.6rem);
+  letter-spacing: 0.05em;
+  color: var(--text-main);
+  text-shadow: 0 0 16px var(--neon-glow), 0 0 40px rgba(47,232,255,0.25);
+}
+.title-sub {
+  font-family: var(--font-body);
+  font-size: clamp(0.6rem, 2.4vw, 0.95rem);
+  letter-spacing: 0.3em;
+  color: var(--neon);
+}
+.home-menu { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; width: 100%; max-width: 420px; }
+
+/* ============================================================
+   2. stage-select
+============================================================ */
+.stage-list {
+  flex: 1; display: flex; gap: 18px; padding: 18px;
+  align-items: flex-start; justify-content: center; flex-wrap: wrap;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.stage-card {
+  width: 240px; padding: 20px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-line);
+  box-shadow: 0 0 0 1px rgba(47,232,255,0.05);
+  clip-path: polygon(14px 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%, 0 14px);
+  cursor: pointer;
+  transition: transform 0.15s ease;
+}
+.stage-card:hover { transform: translateY(-4px); }
+.stage-card .stage-num { font-family: var(--font-mono); color: var(--text-mute); font-size: 0.72rem; }
+.stage-card .stage-name { font-family: var(--font-display); font-size: 1.1rem; margin: 6px 0 10px; }
+.stage-card .stage-stat { display: flex; justify-content: space-between; font-size: 0.82rem; padding: 4px 0; border-top: 1px dashed var(--border-line); color: var(--text-mute); }
+.stage-card .stage-stat span:last-child { color: var(--neon); font-family: var(--font-mono); }
+
+.difficulty-badge {
+  display: inline-block;
+  padding: 3px 10px;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.05em;
+  color: #041018;
+  margin-bottom: 8px;
+}
+.difficulty-badge.beginner     { background: var(--diff-beginner); }
+.difficulty-badge.intermediate { background: var(--diff-intermediate); color: #fff; }
+.difficulty-badge.advanced     { background: var(--diff-advanced); color: #fff; }
+.difficulty-badge.custom       { background: var(--diff-custom); }
+
+#app.difficulty-beginner .advanced-only { display: none; }
+
+.stage-goal {
+  margin-top: 10px; padding-top: 8px;
+  border-top: 1px dashed var(--border-line);
+  font-size: 0.74rem; color: var(--text-mute); line-height: 1.5;
+}
+.stage-goal b { color: var(--accent); font-weight: 700; }
+.stage-freeplay-tag {
+  display: inline-block; margin-top: 8px;
+  font-family: var(--font-mono); font-size: 0.68rem; color: var(--diff-custom);
+}
+
+/* ============================================================
+   3. explanation
+============================================================ */
+#screen-explanation { align-items: center; justify-content: center; padding: 16px; }
+.explanation-panel {
+  width: min(640px, 94vw); max-height: 86vh;
+  background: var(--bg-panel);
+  border: 1px solid var(--accent-dim);
+  box-shadow: 0 0 40px rgba(0,0,0,0.5);
+  clip-path: polygon(18px 0, 100% 0, 100% calc(100% - 18px), calc(100% - 18px) 100%, 0 100%, 0 18px);
+  display: flex; flex-direction: column;
+}
+.explanation-footer {
+  display: flex; justify-content: flex-end; gap: 10px; flex-wrap: wrap;
+  padding: 14px 20px; border-top: 1px solid var(--border-line);
+}
+
+/* ============================================================
+   4. design
+   ------------------------------------------------------------
+   デスクトップは2カラムグリッド、タブレット/スマホ幅では単純な
+   縦積みflexへ完全に切り替える（グリッド由来のサイズ崩れを回避）。
+============================================================ */
+.design-layout {
+  flex: 1; min-height: 0;
+  display: grid;
+  grid-template-columns: 1.3fr 380px;
+  grid-template-rows: 1fr auto;
+  grid-template-areas: "left right" "bottom bottom";
+  gap: 8px;
+  padding: 8px;
+}
+.design-left {
+  grid-area: left;
+  position: relative;
+  background: var(--bg-panel-3);
+  border: 1px solid var(--border-line);
+  display: flex; flex-direction: column;
+  min-height: 0;
+}
+#rocket-preview-2d { flex: 1; width: 100%; min-height: 0; cursor: pointer; touch-action: manipulation; }
+.preview-controls { position: absolute; top: 12px; right: 12px; display: flex; flex-direction: column; gap: 6px; z-index: 2; }
+.viewport-hint {
+  position: absolute; left: 10px; top: 8px; z-index: 2;
+  font-size: 0.65rem; color: var(--text-mute);
+  background: var(--hud-bg);
+  border: 1px solid var(--border-line);
+  padding: 3px 8px;
+  pointer-events: none;
+}
+.part-selector {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  padding: 8px; border-top: 1px solid var(--border-line);
+  background: var(--hud-bg);
+}
+.part-btn {
+  position: relative;
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 8px 12px;
+  font-weight: 600; font-size: 0.82rem;
+  color: var(--text-mute);
+  background: rgba(255,255,255,0.03);
+  min-height: 44px;
+}
+.part-btn.active { color: var(--bg-void); background: var(--accent); font-weight: 700; box-shadow: 0 0 10px var(--accent-glow); }
+.part-help-icon {
+  display: none;
+  width: 16px; height: 16px;
+  align-items: center; justify-content: center;
+  border-radius: 50%;
+  background: var(--warn);
+  color: #241400;
+  font-size: 0.65rem; font-weight: 700;
+  flex-shrink: 0;
+}
+.part-selector.help-mode .part-help-icon { display: inline-flex; }
+
+.design-right {
+  grid-area: right;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-line);
+  display: flex; flex-direction: column;
+  min-height: 0;
+}
+.panel-header {
+  padding: 10px 14px; font-family: var(--font-display); font-size: 0.78rem;
+  letter-spacing: 0.1em; color: var(--accent);
+  border-bottom: 1px solid var(--border-line);
+}
+.param-panel { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 16px; -webkit-overflow-scrolling: touch; }
+
+.design-bottom { grid-area: bottom; display: flex; gap: 8px; flex-wrap: wrap; }
+.data-grid {
+  flex: 2; min-width: 240px;
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 1px; background: var(--border-line); border: 1px solid var(--border-line);
+  overflow: hidden;
+}
+.data-cell { background: var(--bg-panel-2); padding: 8px 10px; display: flex; flex-direction: column; gap: 2px; }
+.data-cell .data-label { font-size: 0.62rem; color: var(--text-mute); }
+.data-cell .data-value { font-family: var(--font-mono); font-size: 1rem; }
+.data-cell.danger .data-value { color: var(--danger); }
+
+/* 【不具合修正】性能バー(design-perf)は常にcolumn(縦積み)を維持する。
+   以前はモバイル幅でrow(横並び)に切り替えていたため、3行(軽さ/強度/安定性)
+   が押し潰されてバーや★が視認できないほど崩れていた。 */
+.design-perf {
+  flex: 1; min-width: 200px;
+  background: var(--bg-panel-2);
+  border: 1px solid var(--border-line);
+  padding: 12px 14px;
+  display: flex; flex-direction: column; gap: 10px; justify-content: center;
+}
+.perf-row { display: flex; align-items: center; gap: 10px; }
+.perf-label { width: 56px; flex-shrink: 0; font-size: 0.74rem; color: var(--text-mute); }
+.perf-bar { flex: 1; height: 14px; display: flex; gap: 2px; min-width: 0; }
+.perf-bar .seg { flex: 1; background: rgba(255,255,255,0.08); }
+.perf-bar .seg.filled { background: var(--accent); box-shadow: 0 0 6px var(--accent-glow); }
+.perf-bar.star-mode, .perf-bar.perf-stars { display: block; font-size: 1.1rem; letter-spacing: 2px; color: var(--accent); }
+.perf-number { font-family: var(--font-mono); color: var(--accent); font-size: 0.85rem; flex-shrink: 0; }
+
+.design-footer { padding: 10px 16px; display: flex; justify-content: flex-end; border-top: 1px solid var(--border-line); }
+.budget-indicator { display: flex; flex-direction: column; align-items: flex-end; font-family: var(--font-mono); }
+.budget-label { font-size: 0.58rem; color: var(--text-mute); }
+.budget-value { font-size: 0.95rem; color: var(--accent); }
+.budget-value.over { color: var(--danger); }
+
+#transition-block {
+  max-height: 0; overflow: hidden; opacity: 0; transform: translateY(-6px);
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+#transition-block.open { max-height: 600px; opacity: 1; transform: translateY(0); }
+
+.field-group { display: flex; flex-direction: column; gap: 6px; }
+.field-group .field-label { font-size: 0.8rem; color: var(--text-mute); display: flex; justify-content: space-between; }
+.field-group .field-label .field-val { color: var(--accent); font-family: var(--font-mono); }
+.select-chip-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.select-chip {
+  padding: 8px 12px; font-size: 0.78rem; min-height: 44px;
+  background: rgba(255,255,255,0.04); border: 1px solid var(--border-line);
+  color: var(--text-mute);
+}
+.select-chip.active { background: var(--accent); color: var(--bg-void); border-color: var(--accent); font-weight: 700; }
+
+.material-list { display: flex; flex-direction: column; gap: 6px; }
+.material-item {
+  display: grid; grid-template-columns: 1fr auto auto;
+  gap: 10px; align-items: center;
+  padding: 10px 12px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border-line);
+  cursor: pointer;
+  min-height: 44px;
+}
+.material-item.active { background: rgba(255,209,102,0.14); border-color: var(--accent); }
+.material-item .mat-name { font-weight: 600; font-size: 0.85rem; }
+.material-item .mat-stars { color: var(--accent); font-size: 0.85rem; letter-spacing: 1px; display: block; margin-top: 2px; }
+.material-item .mat-metric { text-align: right; font-family: var(--font-mono); font-size: 0.8rem; white-space: nowrap; }
+.material-item .mat-metric .mat-diff { display: block; font-size: 0.68rem; }
+.mat-diff.positive { color: var(--danger); }
+.mat-diff.negative { color: var(--success); }
+.mat-diff.zero { color: var(--text-mute); }
+
+.help-bubble {
+  position: absolute; z-index: 60;
+  width: min(320px, 88vw);
+  background: var(--bg-panel);
+  border: 1px solid var(--warn);
+  clip-path: polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px);
+  bottom: 78px; left: 50%; transform: translateX(-50%);
+}
+.help-bubble.hidden { display: none; }
+.help-bubble-header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 8px 12px; font-family: var(--font-display); font-size: 0.76rem;
+  color: var(--warn); border-bottom: 1px solid var(--border-line);
+}
+.help-bubble-body { padding: 10px 14px; display: flex; flex-direction: column; gap: 8px; max-height: 42vh; overflow-y: auto; }
+.help-row .help-tag { display: block; font-size: 0.66rem; color: var(--warn); margin-bottom: 2px; }
+.help-row p { font-size: 0.8rem; line-height: 1.6; }
+
+.save-row { display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
+.design-name-input {
+  flex: 1; min-width: 160px; padding: 10px 14px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border-line);
+  color: var(--text-main);
+  font-size: 0.9rem;
+}
+.designs-list { display: flex; flex-direction: column; gap: 8px; max-height: 50vh; overflow-y: auto; }
+.design-entry {
+  display: grid; grid-template-columns: 1.2fr repeat(4, 1fr) auto;
+  gap: 10px; align-items: center;
+  padding: 10px 14px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border-line);
+  font-size: 0.76rem;
+}
+.design-entry-name { font-weight: 700; font-family: var(--font-display); font-size: 0.74rem; }
+.design-entry-metric { font-family: var(--font-mono); color: var(--text-mute); text-align: center; }
+.design-entry-metric b { display: block; color: var(--accent); font-size: 0.85rem; }
+.design-entry-actions { display: flex; gap: 6px; }
+.designs-empty { color: var(--text-mute); font-size: 0.85rem; text-align: center; padding: 20px; }
+
+/* デザインカスタマイズ: カラーピッカー / デカール選択 */
+.color-picker-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.color-picker-row input[type="color"] {
+  width: 44px; height: 44px; padding: 0;
+  border: 1px solid var(--border-line);
+  background: transparent; cursor: pointer;
+}
+.color-swatch-preview {
+  width: 20px; height: 20px; border: 1px solid var(--border-line);
+  display: inline-block; vertical-align: middle; margin-right: 6px;
+}
+.decal-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 8px; }
+.decal-option {
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  padding: 8px 4px; min-height: 64px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border-line);
+  font-size: 0.66rem; color: var(--text-mute);
+}
+.decal-option .decal-icon { font-size: 1.3rem; }
+.decal-option.active { background: rgba(255,209,102,0.16); border-color: var(--accent); color: var(--accent); }
+
+/* 重量の手動上書きUI（ステージ6限定） */
+.mass-override-group { border-top: 1px dashed var(--border-line); padding-top: 10px; }
+.mass-override-row { display: flex; align-items: center; gap: 8px; }
+.mass-override-row input[type="checkbox"] { width: 20px; height: 20px; accent-color: var(--accent); }
+.mass-override-row input[type="number"] {
+  width: 90px; padding: 8px 10px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border-line);
+  color: var(--text-main);
+  font-family: var(--font-mono);
+}
+.mass-override-row input[type="number"]:disabled { opacity: 0.4; }
+.mass-override-unit { color: var(--text-mute); font-size: 0.8rem; }
+
+/* ============================================================
+   5. launch-prep
+   ------------------------------------------------------------
+   【不具合修正】.launch-scroll に設定項目をすべて閉じ込め、
+   .launch-fixed-bar のLAUNCHボタンは画面下部に常時固定表示する。
+   これにより設定項目がどれだけ増えても発射操作が必ず可能。
+============================================================ */
+.launch-layout { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.launch-scroll {
+  flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;
+  display: flex; align-items: flex-start; justify-content: center;
+  padding: 20px 16px;
+}
+.launch-controls {
+  width: min(440px, 100%);
+  background: var(--bg-panel);
+  border: 1px solid var(--border-line);
+  box-shadow: 0 0 0 1px rgba(47,232,255,0.05);
+  padding: 22px 20px; display: flex; flex-direction: column; gap: 22px;
+}
+.control-block label { display: flex; justify-content: space-between; font-size: 0.82rem; color: var(--text-mute); margin-bottom: 8px; }
+.control-block label span { color: var(--accent); font-family: var(--font-mono); }
+
+.launch-fixed-bar {
+  flex-shrink: 0;
+  display: flex; justify-content: center;
+  padding: 14px 16px calc(14px + var(--safe-bottom));
+  background: linear-gradient(180deg, transparent, rgba(5,7,13,0.85) 30%, var(--bg-void) 100%);
+  border-top: 1px solid var(--border-line);
+}
+.launch-fixed-bar .hud-btn-launch { width: min(320px, 100%); justify-content: center; }
+
+#wind-readout {
+  position: static; /* 固定表示せず設定パネル内の通常フローに配置（スマホでの重なりを回避） */
+  display: flex; align-items: center; gap: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255,255,255,0.2);
+  padding: 8px 14px;
+  font-family: var(--font-mono);
+  font-size: 0.95rem;
+  color: var(--text-main);
+  width: fit-content;
+}
+#wind-readout::before {
+  content: "➤";
+  display: inline-block;
+  color: var(--warn);
+  transform: rotate(var(--wind-angle, 0deg));
+}
+
+.countdown-overlay {
+  position: absolute; inset: 0; z-index: 45;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 12px;
+  background: rgba(2, 6, 14, 0.75);
+}
+.countdown-overlay.hidden { display: none; }
+.countdown-number {
+  font-family: var(--font-display);
+  font-size: clamp(4rem, 24vw, 9rem);
+  color: var(--accent);
+  font-weight: 900;
+  text-shadow: 0 0 30px var(--accent-glow);
+}
+.countdown-wind { font-family: var(--font-mono); color: var(--text-mute); font-size: 0.9rem; }
+
+/* 背景設定（launch-prep画面）: 時間帯・テーマ・カスタム画像 */
+.bg-settings { display: flex; flex-direction: column; gap: 8px; }
+.bg-settings > label { font-size: 0.8rem; color: var(--text-mute); }
+.bg-custom-row { display: flex; align-items: center; gap: 8px; margin-top: 2px; flex-wrap: wrap; }
+.bg-upload-label { cursor: pointer; }
+
+/* ステージ6限定: 風速/重力のカスタム調整UI */
+.physics-settings { display: flex; flex-direction: column; gap: 10px; }
+.physics-settings > label { font-size: 0.8rem; color: var(--text-mute); }
+.physics-slider-row label {
+  display: flex; justify-content: space-between;
+  font-size: 0.78rem; color: var(--text-mute); margin-bottom: 6px;
+}
+.physics-slider-row label span { color: var(--accent); font-family: var(--font-mono); }
+
+/* ============================================================
+   6. flight
+============================================================ */
+.flight-hud {
+  position: absolute; inset: 0; z-index: 20; pointer-events: none;
+  display: flex; justify-content: space-between; align-items: flex-start;
+  padding: calc(12px + var(--safe-top)) 12px 12px;
+}
+.sim-telemetry { display: flex; gap: 10px; flex-wrap: wrap; }
+.tele-item {
+  display: flex; align-items: baseline; gap: 5px;
+  background: var(--hud-bg);
+  border: 1px solid var(--border-line);
+  padding: 6px 12px;
+}
+.tele-label { font-size: 0.62rem; color: var(--text-mute); }
+.tele-value { font-family: var(--font-mono); font-size: 1.1rem; color: var(--accent); }
+.tele-unit { font-size: 0.66rem; color: var(--text-mute); }
+
+.hud-badges { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+.hud-badge {
+  background: var(--hud-bg);
+  border: 1px solid var(--border-line);
+  color: var(--accent);
+  font-family: var(--font-mono);
+  padding: 6px 12px;
+  font-size: 0.85rem;
+}
+.hud-btn-retire {
+  background: rgba(255,59,92,0.12);
+  border-color: var(--danger);
+  color: var(--danger);
+  pointer-events: auto;
+}
+.hud-btn-retire:hover { background: rgba(255,59,92,0.25); }
+
+.three-fallback {
+  display: flex; align-items: center; justify-content: center;
+  height: 100%; padding: 24px; text-align: center;
+  color: var(--text-mute); font-size: 0.82rem; line-height: 1.8;
+}
+
+.wind-arrow {
+  position: absolute; right: 12px; bottom: 90px;
+  width: 52px; height: 52px;
+  will-change: transform;
+}
+.wind-arrow-ring { fill: none; stroke: var(--border-line); stroke-width: 2; }
+.wind-arrow-needle { fill: var(--warn); }
+
+.flight-controls {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 21;
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  padding: 10px 14px calc(10px + var(--safe-bottom));
+  background: var(--hud-bg);
+}
+.zoom-block { display: flex; align-items: center; gap: 10px; min-width: 150px; flex: 1; }
+.zoom-block label { font-size: 0.7rem; color: var(--text-mute); }
+
+/* ============================================================
+   7. result
+============================================================ */
+#screen-result { align-items: center; justify-content: center; padding: 16px; }
+.result-panel {
+  position: relative; z-index: 1;
+  width: min(460px, 100%);
+  background: rgba(11, 17, 29, 0.94);
+  border: 1px solid var(--accent-dim);
+  box-shadow: 0 0 40px rgba(0,0,0,0.5);
+  clip-path: polygon(20px 0, 100% 0, 100% calc(100% - 20px), calc(100% - 20px) 100%, 0 100%, 0 20px);
+  padding: 26px 22px; text-align: center;
+  max-height: 92vh; overflow-y: auto; -webkit-overflow-scrolling: touch;
+}
+.result-title { font-family: var(--font-display); color: var(--accent); letter-spacing: 0.15em; margin-bottom: 20px; text-shadow: 0 0 12px var(--accent-glow); }
+.result-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 20px; }
+.stat-cell { display: flex; flex-direction: column; gap: 4px; padding: 10px; background: var(--bg-panel-2); }
+.stat-label { font-size: 0.6rem; color: var(--text-mute); }
+.stat-value { font-family: var(--font-mono); font-size: 1rem; }
+.result-score { margin-bottom: 22px; }
+.score-label { display: block; font-size: 0.68rem; color: var(--text-mute); letter-spacing: 0.2em; }
+.score-value { font-family: var(--font-display); font-size: 2.6rem; color: var(--success); text-shadow: 0 0 20px rgba(57,255,143,0.4); }
+.result-buttons { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; align-items: center; }
+.result-buttons .btn-quiet { order: 1; }
+.result-buttons .hud-btn-primary { order: 2; width: 100%; }
+
+.result-clear-badge {
+  display: inline-block; padding: 4px 14px; margin-bottom: 10px;
+  font-family: var(--font-mono); font-size: 0.75rem; letter-spacing: 0.1em;
+}
+.result-clear-badge.clear  { background: var(--success); color: #04170c; }
+.result-clear-badge.failed { background: var(--danger);  color: #1a0206; }
+.result-clear-badge.freeplay { background: var(--diff-custom); color: #1a1a1a; }
+.result-clear-badge:empty { display: none; }
+
+.design-export-text {
+  width: 100%; min-height: 220px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border-line);
+  color: var(--text-main);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  padding: 10px;
+  resize: vertical;
+}
+
+/* ランキング表示 */
+.ranking-list { display: flex; flex-direction: column; gap: 6px; max-height: 60vh; overflow-y: auto; }
+.ranking-row {
+  display: grid; grid-template-columns: 32px 1fr 1.2fr 80px;
+  gap: 10px; align-items: center;
+  padding: 10px 12px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border-line);
+  font-size: 0.8rem;
+}
+.ranking-rank { font-family: var(--font-display); color: var(--text-mute); text-align: center; }
+.ranking-name { font-weight: 600; }
+.ranking-stage { color: var(--text-mute); font-size: 0.7rem; }
+.ranking-score { font-family: var(--font-mono); color: var(--accent); text-align: right; }
+.ranking-row.ranking-top1 { border-color: #ffd166; background: rgba(255,209,102,0.12); }
+.ranking-row.ranking-top1 .ranking-rank { color: #ffd166; }
+.ranking-row.ranking-top2 { border-color: #cfd8dc; }
+.ranking-row.ranking-top3 { border-color: #cd7f32; }
+
+/* チュートリアルモーダル固有 */
+#modal-tutorial .modal-panel { border-color: var(--accent); }
+#tutorial-body { font-size: 0.9rem; line-height: 1.7; color: var(--text-main); }
+#tutorial-body p { color: var(--text-main); margin-bottom: 8px; }
+.tutorial-image {
+  display: block; width: 100%; max-height: 220px;
+  object-fit: contain; margin-bottom: 12px;
+  background: rgba(255,255,255,0.03);
+  border: 1px dashed var(--border-line);
+}
+
+/* キャラクター画像プレースホルダー */
+.character-img {
+  display: block; object-fit: contain;
+  background: rgba(255,255,255,0.03);
+  border: 1px dashed var(--border-line);
+}
+.character-img-home { width: 84px; height: 84px; margin: 0 auto 4px; opacity: 0.92; }
+.character-img-inline { width: 56px; height: 56px; float: left; margin: 0 12px 8px 0; }
+.character-img[src=""], .character-img:not([src]) { display: none; }
+
+/* 自由視点モード: パン操作のカーソル制御 */
+body.state-flight.view-free #overlay { cursor: grab; touch-action: none; }
+body.state-flight.view-free #overlay:active { cursor: grabbing; }
+
+/* ============================================================
+   レスポンシブ
+   ------------------------------------------------------------
+   768px: タブレット〜大型スマホ（design画面を1カラム縦積みへ）
+   480px: スマホ全般の最終微調整
+============================================================ */
+@media (max-width: 768px) {
+  .design-layout {
+    display: flex; flex-direction: column;
+    overflow-y: auto; -webkit-overflow-scrolling: touch;
+    padding: 6px; gap: 6px;
+  }
+  .design-left { min-height: 320px; flex: none; }
+  .design-right { min-height: 260px; flex: none; }
+  .design-bottom { flex-direction: column; }
+  .design-perf, .data-grid { width: 100%; }
+
+  .stage-list { padding: 14px; gap: 14px; }
+  .stage-card { width: min(100%, 340px); }
+
+  .launch-controls { padding: 18px 16px; gap: 18px; }
+
+  .result-panel { padding: 22px 16px; }
+}
+
+@media (max-width: 480px) {
+  .home-menu { flex-direction: column; width: 100%; }
+  .home-menu .hud-btn { justify-content: center; width: 100%; }
+  .part-selector { justify-content: center; }
+  .modal-panel, .modal-panel-wide { width: 96vw; }
+  .topbar { padding: 8px 10px; }
+  .screen-title { font-size: 0.78rem; }
+  .stage-card { width: 100%; max-width: 340px; }
+
+  .sim-telemetry { gap: 6px; }
+  .tele-item { padding: 5px 9px; }
+  .tele-value { font-size: 0.95rem; }
+  .hud-badges { gap: 6px; }
+  .hud-badge { padding: 5px 9px; font-size: 0.78rem; }
+
+  .flight-controls { flex-direction: column; align-items: stretch; gap: 8px; }
+  .btn-group { justify-content: center; }
+  .wind-arrow { width: 40px; height: 40px; bottom: 128px; right: 8px; }
+
+  #wind-readout { font-size: 0.85rem; padding: 7px 12px; }
+
+  .result-stats { grid-template-columns: repeat(3, 1fr); font-size: 0.76rem; }
+  .score-value { font-size: 2.1rem; }
+  .design-entry { grid-template-columns: 1fr 1fr; }
+
+  .character-img-home { width: 64px; height: 64px; }
+  .character-img-inline { width: 48px; height: 48px; margin: 0 8px 6px 0; }
+  .design-export-text { min-height: 160px; font-size: 0.7rem; }
+  .decal-grid { grid-template-columns: repeat(auto-fill, minmax(52px, 1fr)); }
+
+  .ranking-row { grid-template-columns: 24px 1fr 56px; font-size: 0.74rem; }
+  .ranking-stage { display: none; } /* 幅が足りないスマホでは省略 */
+
+  .launch-fixed-bar { padding: 12px 12px calc(12px + var(--safe-bottom)); }
+  .launch-fixed-bar .hud-btn-launch { font-size: 1.05rem; padding: 14px 0; }
+}
+
+/* ============================================================
+   アクセシビリティ: アニメーション低減
+============================================================ */
+@media (prefers-reduced-motion: reduce) {
+  * { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
+}

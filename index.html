@@ -1,0 +1,493 @@
+<!--
+  ファイル名: index.html
+  依存関係: stage.js(STAGES export を利用) / script.js(Router: 7ステート遷移) /
+            ui.js・result.js(UIコンポーネントを #app 配下にマウント) / style.css
+-->
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+<title>ROCKET FORGE | モデルロケットシミュレーター</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- =========================================================
+       3層canvas（アプリ全体で1組のみ）。
+       - bg      : 家・人・ビル・電柱・空（オフスクリーンキャッシュ済みオブジェクトを配置）
+       - rocket  : ロケット本体・炎・軌跡
+       - overlay : 風矢印・HUD（飛行中のみ pointer-events:auto に切替）
+       いずれも初期状態は pointer-events:none（style.cssで規定）。
+       表示/非表示・描画対象は script.js の現在stateに応じて制御する。
+  ========================================================== -->
+  <canvas id="bg" class="layer-canvas" aria-hidden="true"></canvas>
+  <canvas id="rocket" class="layer-canvas" aria-hidden="true"></canvas>
+  <canvas id="overlay" class="layer-canvas" aria-hidden="true"></canvas>
+
+  <!-- =========================================================
+       アプリ本体。7ステート(home/stage-select/explanation/design/
+       launch-prep/flight/result)を、script.jsのRouterが
+       .screen.active の付け替えのみで制御する（同時複数可視は禁止）。
+  ========================================================== -->
+  <div id="app">
+
+    <!-- ============================================================
+         STATE: home
+    ============================================================= -->
+    <section id="screen-home" class="screen active" data-state="home" aria-label="ホーム画面">
+      <canvas id="home-bg-canvas" aria-hidden="true"></canvas>
+      <div class="home-content">
+        <img id="character-home" class="character-img character-img-home"
+             src="assets/character.png" alt="ナビゲーターキャラクター" />
+        <h1 class="game-title">
+          <span class="title-main">ROCKET&nbsp;FORGE</span>
+          <span class="title-sub">MODEL ROCKET SIMULATOR</span>
+        </h1>
+        <div class="home-menu">
+          <button id="btn-goto-stage" class="hud-btn hud-btn-primary" aria-label="ステージ選択へ進む">
+            ステージ選択
+          </button>
+          <button id="btn-goto-rules" class="hud-btn" aria-label="ルール説明を開く">
+            ルール説明
+          </button>
+        </div>
+      </div>
+
+      <!-- ルール説明モーダル -->
+      <div id="modal-rules" class="modal hidden" role="dialog" aria-modal="true" aria-label="ルール説明">
+        <div class="modal-panel">
+          <div class="modal-header">
+            <span>MISSION BRIEFING</span>
+            <button id="btn-close-rules" class="btn-close" aria-label="ルール説明を閉じる">×</button>
+          </div>
+          <div class="modal-body" id="rules-body">
+            <!-- ui.js が内容を挿入 -->
+            <!-- 「ルール説明の一番下」に PDF リンクslot。
+                 プレースホルダーURL "#" を既定値とし、実URLが用意でき次第
+                 script.js から href を差し替える想定（要素自体は常時表示）。 -->
+            <a id="rules-pdf-link"
+               href="#"
+               target="_blank"
+               rel="noopener"
+               class="rules-pdf-link"
+               aria-label="詳細ルールをPDFで開く（別タブ）">
+              詳細ルール(PDF)
+            </a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================
+         STATE: stage-select
+    ============================================================= -->
+    <section id="screen-stage-select" class="screen" data-state="stage-select" aria-label="ステージ選択画面">
+      <div class="topbar">
+        <button class="hud-btn hud-btn-small" id="btn-stage-back" aria-label="ホームへ戻る">← ホーム</button>
+        <h2 class="screen-title">STAGE SELECT</h2>
+        <div class="topbar-spacer"></div>
+      </div>
+      <div id="stage-list" class="stage-list" aria-label="ステージ一覧">
+        <!-- ui.js が STAGES(stage.js) からステージカードを生成 -->
+      </div>
+    </section>
+
+    <!-- ============================================================
+         STATE: explanation（beginnerステージ選択時のみ経由）
+    ============================================================= -->
+    <section id="screen-explanation" class="screen" data-state="explanation" aria-label="工程説明画面">
+      <div class="explanation-panel">
+        <div class="modal-header">
+          <span>HOW TO BUILD A ROCKET</span>
+        </div>
+        <div class="modal-body" id="explanation-body">
+          <img id="character-explanation" class="character-img character-img-inline"
+               src="assets/character.png" alt="ナビゲーターキャラクター" />
+          <!-- ui.js が工程説明コンテンツを挿入 -->
+        </div>
+        <div class="explanation-footer">
+          <button id="btn-explanation-skip" class="hud-btn" aria-label="説明をスキップして設計へ進む">スキップ</button>
+          <button id="btn-explanation-next" class="hud-btn hud-btn-primary" aria-label="設計画面へ進む">設計をはじめる ▶</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================
+         STATE: design
+    ============================================================= -->
+    <section id="screen-design" class="screen" data-state="design" aria-label="設計画面">
+      <div class="topbar">
+        <button class="hud-btn hud-btn-small" id="btn-design-back" aria-label="ステージ選択へ戻る">← ステージ選択</button>
+        <h2 class="screen-title" id="design-stage-name">DESIGN BAY</h2>
+        <div class="topbar-actions">
+          <button class="icon-btn" id="btn-designs-manager" aria-label="設計の保存・比較を開く">💾</button>
+          <button class="icon-btn" id="btn-help-toggle" aria-label="部品の説明表示を切り替え">？</button>
+          <div class="budget-indicator" id="budget-indicator">
+            <span class="budget-label">BUDGET</span>
+            <span class="budget-value" id="budget-value">0 / 0</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="design-layout">
+        <!-- 左: ロケットリアルタイム表示（2D Canvas。部品をタップすると該当パラメータが開く）
+             ※ 以前はThree.js(ESモジュール)による3D表示だったが、CDN経由のモジュール
+               読み込みがネットワーク環境によって失敗し「ロケットが表示されない」不具合が
+               再発したため、外部依存のない2D Canvas描画へフォールバックした。 -->
+        <div class="design-left">
+          <canvas id="rocket-preview-2d" aria-label="ロケットプレビュー（クリック/タップで部品を選択できます）"></canvas>
+          <div class="preview-controls">
+            <button id="btn-zoom-in" class="icon-btn" aria-label="拡大">＋</button>
+            <button id="btn-zoom-out" class="icon-btn" aria-label="縮小">－</button>
+          </div>
+          <div class="viewport-hint">ロケットをタップすると該当パーツの編集項目が開きます</div>
+          <div class="part-selector" id="part-selector" role="tablist" aria-label="編集する部品の選択">
+            <button class="part-btn active" data-part="nose" role="tab" aria-selected="true" aria-label="ノーズを編集">
+              ノーズ<span class="part-help-icon" data-help="nose" aria-label="ノーズの説明を表示">?</span>
+            </button>
+            <button class="part-btn" data-part="body" role="tab" aria-selected="false" aria-label="ボディを編集">
+              ボディ<span class="part-help-icon" data-help="body" aria-label="ボディの説明を表示">?</span>
+            </button>
+            <!-- トランジション（テーパー形状）: ステージ3〜6（中級/上級/カスタム）でのみ表示。
+                 初心者ステージでは .advanced-only により style.css 側で非表示になる。
+                 パーツ構成上は ノーズ→ボディ→トランジション→ボディ→フィン という並びを想定。 -->
+            <button class="part-btn advanced-only" data-part="transition" role="tab" aria-selected="false" aria-label="トランジションを編集">
+              トランジション<span class="part-help-icon" data-help="transition" aria-label="トランジションの説明を表示">?</span>
+            </button>
+            <button class="part-btn" data-part="fin" role="tab" aria-selected="false" aria-label="フィンを編集">
+              フィン<span class="part-help-icon" data-help="fin" aria-label="フィンの説明を表示">?</span>
+            </button>
+            <button class="part-btn" data-part="parachute" role="tab" aria-selected="false" aria-label="パラシュートを編集">
+              パラシュート<span class="part-help-icon" data-help="parachute" aria-label="パラシュートの説明を表示">?</span>
+            </button>
+            <button class="part-btn" data-part="weight" role="tab" aria-selected="false" aria-label="おもりを編集">
+              おもり<span class="part-help-icon" data-help="weight" aria-label="おもりの説明を表示">?</span>
+            </button>
+            <button class="part-btn" data-part="engine" role="tab" aria-selected="false" aria-label="エンジンを編集">
+              エンジン<span class="part-help-icon" data-help="engine" aria-label="エンジンの説明を表示">?</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- 右: パラメータ編集パネル -->
+        <div class="design-right">
+          <div class="panel-header">PARAMETER EDIT</div>
+          <div id="param-panel" class="param-panel" aria-live="polite">
+            <!-- ui.js が選択部品に応じて動的生成 -->
+          </div>
+        </div>
+
+        <!-- 下: 詳細データ + 性能バー -->
+        <div class="design-bottom">
+          <div class="design-perf">
+            <div class="perf-row">
+              <span class="perf-label">軽さ</span>
+              <div class="perf-bar" id="perf-bar-light" aria-label="軽さレベル"></div>
+            </div>
+            <div class="perf-row">
+              <span class="perf-label">強度</span>
+              <div class="perf-bar perf-stars" id="perf-bar-strength" aria-label="強度レベル"></div>
+            </div>
+            <div class="perf-row">
+              <span class="perf-label">安定性</span>
+              <span class="perf-number" id="perf-stability">0.0 cal</span>
+            </div>
+          </div>
+          <div class="data-grid" id="data-grid" aria-live="polite">
+            <!-- ui.js が生成: 質量/CG/CP/予測高度/価格 等 -->
+          </div>
+        </div>
+      </div>
+
+      <div class="design-footer">
+        <button id="btn-goto-launch" class="hud-btn hud-btn-primary" aria-label="発射待機画面へ進む">発射待機へ ▶</button>
+      </div>
+
+      <!-- 部品説明の吹き出し（？モード） -->
+      <div id="help-bubble" class="help-bubble hidden" role="tooltip">
+        <div class="help-bubble-header">
+          <span id="help-bubble-title">部品名</span>
+          <button id="btn-close-help-bubble" class="btn-close" aria-label="説明を閉じる">×</button>
+        </div>
+        <div class="help-bubble-body">
+          <div class="help-row"><span class="help-tag">役割</span><p id="help-role"></p></div>
+          <div class="help-row"><span class="help-tag">性能への影響</span><p id="help-effect"></p></div>
+          <div class="help-row"><span class="help-tag">初心者向けアドバイス</span><p id="help-tip"></p></div>
+          <div class="help-row"><span class="help-tag">おすすめ設定</span><p id="help-recommend"></p></div>
+        </div>
+      </div>
+
+      <!-- 設計の保存・比較モーダル -->
+      <div id="modal-designs" class="modal hidden" role="dialog" aria-modal="true" aria-label="設計の保存・比較">
+        <div class="modal-panel modal-panel-wide">
+          <div class="modal-header">
+            <span>DESIGN ARCHIVE（保存・比較）</span>
+            <button id="btn-close-designs" class="btn-close" aria-label="閉じる">×</button>
+          </div>
+          <div class="modal-body">
+            <div class="save-row">
+              <input type="text" id="design-name-input" placeholder="設計名を入力"
+                     class="design-name-input" aria-label="設計名を入力" />
+              <button id="btn-save-design" class="hud-btn hud-btn-primary hud-btn-small" aria-label="この設計を保存">
+                この設計を保存
+              </button>
+            </div>
+            <div id="designs-list" class="designs-list" aria-label="保存済み設計の一覧">
+              <!-- ui.js が保存済み設計の比較リストを生成 -->
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================
+         STATE: launch-prep
+         （発射待機中は毎フレーム風速がランダム更新される。
+           「発射」押下でこのstate内にカウントダウンオーバーレイを
+           表示し、3秒後に flight state へ遷移する）
+    ============================================================= -->
+    <section id="screen-launch-prep" class="screen" data-state="launch-prep" aria-label="発射待機画面">
+      <div class="topbar">
+        <button class="hud-btn hud-btn-small" id="btn-launch-back" aria-label="設計画面へ戻る">← 設計画面</button>
+        <h2 class="screen-title">LAUNCH PREPARATION</h2>
+        <div class="topbar-spacer"></div>
+      </div>
+
+      <!-- 【修正した不具合】ステージ6のように設定項目(背景/物理パラメータ)が
+           多いと、旧構成(1つの中央寄せブロックにLAUNCHボタンまで内包)では
+           画面下部にボタンが埋もれてタップできなくなっていた。
+           スクロール領域(.launch-scroll)とLAUNCHボタン専用の固定バー
+           (.launch-fixed-bar)を分離し、設定がどれだけ増えてもボタンは
+           常に画面下部に固定表示・タップ可能な状態を保つ。 -->
+      <div class="launch-layout">
+        <div class="launch-scroll">
+          <div class="launch-controls">
+            <!-- 発射角度 -->
+            <div class="control-block">
+              <label for="angle-slider">発射角度 <span id="angle-value">0°</span></label>
+              <input type="range" id="angle-slider" min="-45" max="45" value="0" step="1"
+                     aria-label="発射角度（-45度から45度）" />
+            </div>
+
+            <!-- 待機中も毎フレーム更新される風況表示 -->
+            <div class="control-block wind-info">
+              <label id="wind-readout-label">現在の風況</label>
+              <div id="wind-readout" class="wind-readout" aria-live="polite">-- m/s / --°</div>
+            </div>
+
+            <!-- 背景設定: 時間帯 / テーマ / カスタム画像アップロード -->
+            <div class="control-block bg-settings">
+              <label>打ち上げ背景</label>
+              <div class="btn-group" id="bg-timeofday" role="group" aria-label="時間帯の切り替え">
+                <button type="button" class="btn-toggle active" data-tod="day" aria-label="昼">☀ 昼</button>
+                <button type="button" class="btn-toggle" data-tod="night" aria-label="夜">🌙 夜</button>
+              </div>
+              <div class="btn-group" id="bg-theme" role="group" aria-label="背景テーマの切り替え">
+                <button type="button" class="btn-toggle active" data-theme="city" aria-label="都市">都市</button>
+                <button type="button" class="btn-toggle" data-theme="suburb" aria-label="郊外">郊外</button>
+                <button type="button" class="btn-toggle" data-theme="wasteland" aria-label="荒野">荒野</button>
+              </div>
+              <div class="bg-custom-row">
+                <label for="bg-image-input" class="hud-btn hud-btn-small bg-upload-label" aria-label="カスタム背景画像を選択">
+                  📁 カスタム画像を読込む
+                </label>
+                <input type="file" id="bg-image-input" accept="image/*" class="visually-hidden" />
+                <button type="button" id="bg-image-clear" class="icon-btn" aria-label="カスタム画像をクリア" title="カスタム画像をクリア">✕</button>
+              </div>
+            </div>
+
+            <!-- ステージ6限定: 風速・重力のカスタム調整UI（stage.customPhysicsUnlockedがtrueの時のみ表示） -->
+            <div class="control-block physics-settings hidden" id="physics-settings">
+              <label>物理パラメータ設定（ステージ6限定）</label>
+              <div class="physics-slider-row">
+                <label for="custom-wind-min">風速 最小 <span id="custom-wind-min-value">0.0</span> m/s</label>
+                <input type="range" id="custom-wind-min" min="0" max="15" value="0" step="0.5" aria-label="風速の最小値" />
+              </div>
+              <div class="physics-slider-row">
+                <label for="custom-wind-max">風速 最大 <span id="custom-wind-max-value">4.0</span> m/s</label>
+                <input type="range" id="custom-wind-max" min="0" max="15" value="4" step="0.5" aria-label="風速の最大値" />
+              </div>
+              <div class="physics-slider-row">
+                <label for="custom-gravity">重力倍率 <span id="custom-gravity-value">1.0</span> G</label>
+                <input type="range" id="custom-gravity" min="0.1" max="5" value="1" step="0.1" aria-label="重力倍率" />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- LAUNCHボタンは常に画面下部に固定表示（スクロール量に関わらずタップ可能） -->
+        <div class="launch-fixed-bar">
+          <button id="launch-btn" class="hud-btn hud-btn-launch" aria-label="発射する">
+            <span class="btn-icon">🔥</span> LAUNCH
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================
+         STATE: flight
+         （ロケット描画・背景は body直下の3層canvasが担当。
+           このセクションにはHUD/操作UIのみを配置する）
+    ============================================================= -->
+    <section id="screen-flight" class="screen" data-state="flight" aria-label="飛行中の画面">
+      <div class="flight-hud">
+        <!-- 左上: テレメトリ -->
+        <div class="sim-telemetry">
+          <div class="tele-item"><span class="tele-label">ALT</span><span id="tele-alt" class="tele-value">0</span><span class="tele-unit">m</span></div>
+          <div class="tele-item"><span class="tele-label">VEL</span><span id="tele-vel" class="tele-value">0</span><span class="tele-unit">m/s</span></div>
+          <div class="tele-item"><span class="tele-label">T+</span><span id="tele-time" class="tele-value">0.0</span><span class="tele-unit">s</span></div>
+        </div>
+
+        <!-- 右上: 倍率/ズームバッジ + リタイアボタン -->
+        <div class="hud-badges">
+          <span id="hud-speed" class="hud-badge" aria-label="現在の再生倍率">1x</span>
+          <span id="hud-zoom" class="hud-badge" aria-label="現在のズーム倍率">1.0x</span>
+          <button id="btn-retire" class="hud-btn hud-btn-small hud-btn-retire" aria-label="打ち上げを途中で切り上げる（リタイア）">✕ リタイア</button>
+        </div>
+
+        <!-- 右下: 風矢印（SVG、overlay canvasとは別にDOM要素として回転制御） -->
+        <svg id="wind-arrow-flight" class="wind-arrow" viewBox="0 0 64 64" aria-label="風向を示す矢印">
+          <circle cx="32" cy="32" r="30" class="wind-arrow-ring" />
+          <path d="M32 10 L40 30 L32 24 L24 30 Z" class="wind-arrow-needle" />
+        </svg>
+      </div>
+
+      <!-- カウントダウン・オーバーレイ（打ち上げ画面（家・ビル等の背景）に遷移した直後に表示、3秒間。
+           発射準備画面ではなくこちらに配置することで、背景のある打ち上げシーンを
+           見せながらカウントダウンできるようにしている） -->
+      <div id="countdown-overlay" class="countdown-overlay hidden" aria-live="assertive">
+        <div class="countdown-number" id="countdown-number">3</div>
+        <div class="countdown-wind" id="countdown-wind">-- m/s / --°</div>
+      </div>
+
+      <!-- 下部操作バー: 視点切替 / 倍速 / ズーム -->
+      <div class="flight-controls">
+        <div id="view-mode" class="btn-group" role="group" aria-label="視点モード切り替え">
+          <button class="btn-toggle" data-view="fixed" aria-label="固定視点">固定</button>
+          <button class="btn-toggle active" data-view="track" aria-label="自動追尾視点">自動追尾</button>
+          <button class="btn-toggle" data-view="free" aria-label="自由視点（ドラッグ操作）">自由</button>
+        </div>
+
+        <div id="speed-x" class="btn-group" role="group" aria-label="再生速度の切り替え">
+          <button class="btn-toggle" data-speed="0.5" aria-label="0.5倍速">0.5x</button>
+          <button class="btn-toggle active" data-speed="1" aria-label="1倍速（標準）">1x</button>
+          <button class="btn-toggle" data-speed="2" aria-label="2倍速">2x</button>
+          <button class="btn-toggle" data-speed="4" aria-label="4倍速">4x</button>
+          <button class="btn-toggle" data-speed="8" aria-label="8倍速">8x</button>
+        </div>
+
+        <div class="control-block zoom-block">
+          <label for="zoom">ZOOM</label>
+          <input type="range" id="zoom" min="0.1" max="40" value="1" step="0.1"
+                 aria-label="ズーム倍率（0.1倍から40倍）" />
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================
+         STATE: result
+         （専用canvasは持たず、body直下の共有3層canvasを
+           そのまま背景として使い続け、パネルを前面に重ねる）
+    ============================================================= -->
+    <section id="screen-result" class="screen" data-state="result" aria-label="リザルト画面">
+      <div class="result-panel">
+        <img id="character-result" class="character-img character-img-inline"
+             src="assets/character.png" alt="ナビゲーターキャラクター" />
+        <div id="result-clear-badge" class="result-clear-badge" aria-live="polite"><!-- script.js/result.js が CLEAR/FAILED を設定 --></div>
+        <h2 class="result-title">MISSION COMPLETE</h2>
+        <div class="result-stats" id="result-stats" aria-live="polite">
+          <!-- result.js が生成 -->
+        </div>
+        <div class="result-score">
+          <span class="score-label">SCORE</span>
+          <span class="score-value" id="result-score">0</span>
+        </div>
+        <div class="result-buttons">
+          <button id="export-design" class="btn-quiet" aria-label="設計パラメーターを出力">設計パラメーター出力</button>
+          <button id="share-result" class="btn-quiet" aria-label="結果を共有">結果を共有</button>
+          <button id="btn-view-ranking" class="btn-quiet" aria-label="ランキングを見る">ランキングを見る</button>
+          <button id="replay-btn" class="hud-btn hud-btn-primary" aria-label="もう一度あそぶ（同じステージに再挑戦）">もう一度あそぶ</button>
+          <button id="btn-result-stage-select" class="hud-btn" aria-label="ステージ選択に戻る">ステージ選択に戻る</button>
+        </div>
+      </div>
+
+      <!-- 「設計パラメーター出力」用モーダル（部品別寸法/重量/CG・CP/エンジン情報などをテキスト表示） -->
+      <div id="modal-design-export" class="modal hidden" role="dialog" aria-modal="true" aria-label="設計パラメーター出力">
+        <div class="modal-panel modal-panel-wide">
+          <div class="modal-header">
+            <span>DESIGN PARAMETERS</span>
+            <button id="btn-close-design-export" class="btn-close" aria-label="閉じる">×</button>
+          </div>
+          <div class="modal-body">
+            <textarea id="design-export-text" class="design-export-text" readonly
+                      aria-label="設計パラメーターのテキスト出力"></textarea>
+            <div class="save-row">
+              <button id="btn-copy-design-export" class="hud-btn hud-btn-small" aria-label="テキストをコピー">コピー</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ランキングモーダル（RANKING_DATA配列はranking-data.jsで管理） -->
+      <div id="modal-ranking" class="modal hidden" role="dialog" aria-modal="true" aria-label="ランキング">
+        <div class="modal-panel">
+          <div class="modal-header">
+            <span>RANKING</span>
+            <button id="btn-close-ranking" class="btn-close" aria-label="閉じる">×</button>
+          </div>
+          <div class="modal-body">
+            <div id="ranking-list" class="ranking-list" aria-label="ランキング一覧">
+              <!-- ui.js が RANKING_DATA から生成 -->
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </div><!-- /#app -->
+
+  <!-- =========================================================
+       汎用チュートリアル解説モーダル（初心者ステージ限定）
+       ------------------------------------------------------------
+       #app の外・bodyの最後方に配置し、z-indexで常に最前面に表示する。
+       「設計」「発射待機」など各工程に入るたびに script.js が
+       内容(#tutorial-body)を差し替えて表示し、閉じるボタンで消える。
+       #screen-explanation（工程全体の導入説明・独立ステート）とは別に、
+       各工程の入口で毎回出す軽量な案内として使う想定。
+  ========================================================== -->
+  <div id="modal-tutorial" class="modal hidden" role="dialog" aria-modal="true" aria-label="チュートリアル解説">
+    <div class="modal-panel">
+      <div class="modal-header">
+        <span id="tutorial-title">TUTORIAL</span>
+        <button id="btn-close-tutorial" class="btn-close" aria-label="チュートリアルを閉じる">×</button>
+      </div>
+      <div class="modal-body">
+        <img id="character-tutorial" class="character-img character-img-inline"
+             src="assets/character.png" alt="ナビゲーターキャラクター" />
+        <div id="tutorial-body">
+          <!-- script.js/ui.js が工程ごとの解説文を挿入 -->
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- =========================================================
+       スクリプト読み込み順は依存関係の順:
+       physics → rocket → stage → ui → result → script
+       ※ 以前はThree.js(ESモジュール, rocket3d.js)による3D表示だったが、
+         CDNからのモジュール読み込み失敗によりロケットが表示されない
+         不具合が繰り返し発生したため撤去し、外部依存のない2D Canvas
+         描画（ui.js内 drawRocketShape）に一本化した。rocket3d.jsの
+         ファイル自体は将来の再検討用にプロジェクト内に残しているが、
+         読み込みはしていない。
+  ========================================================== -->
+  <script src="ranking-data.js"></script>
+  <script src="physics.js"></script>
+  <script src="rocket.js"></script>
+  <script src="stage.js"></script>
+  <script src="ui.js"></script>
+  <script src="result.js"></script>
+  <script src="script.js"></script>
+</body>
+</html>
